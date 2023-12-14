@@ -1,7 +1,5 @@
 mod packet;
 
-use std::fs::File;
-use std::io::Read;
 use std::net::UdpSocket;
 
 use packet::*;
