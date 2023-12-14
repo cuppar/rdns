@@ -2,6 +2,7 @@ mod packet;
 
 use std::fs::File;
 use std::io::Read;
+use std::net::UdpSocket;
 
 use packet::*;
 
@@ -12,28 +13,30 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    let mut file = File::open("response_packet.txt")?;
-    let mut buffer = BytePacketBuffer::new();
-    file.read(&mut buffer.buf)?;
+    let qname = "baidu.com";
+    let qtype = QueryType::A;
 
-    let packet = DnsPacket::from_buffer(&mut buffer)?;
-    println!("{:#?}", packet.header);
+    let server = ("8.8.8.8", 53);
 
-    for q in packet.questions {
-        println!("{:#?}", q);
-    }
+    let socket = UdpSocket::bind(("0.0.0.0", 22222))?;
 
-    for rec in packet.answers {
-        println!("{:#?}", rec);
-    }
+    let mut req_packet = DnsPacket::new();
 
-    for rec in packet.authorities {
-        println!("{:#?}", rec);
-    }
+    req_packet.header.id = 9999;
+    req_packet.header.questions = 1;
+    req_packet.header.recursion_desired = true;
+    req_packet.questions.push(DnsQuestion::new(qname, qtype));
 
-    for rec in packet.resources {
-        println!("{:#?}", rec);
-    }
+    let mut req_buffer = BytePacketBuffer::new();
+    req_packet.write(&mut req_buffer)?;
+
+    socket.send_to(&req_buffer.buf[..req_buffer.pos], server)?;
+
+    let mut res_buffer = BytePacketBuffer::new();
+    socket.recv_from(&mut res_buffer.buf)?;
+
+    let res_packet = DnsPacket::from_buffer(&mut res_buffer)?;
+    println!("{}", res_packet);
 
     Ok(())
 }

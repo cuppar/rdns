@@ -1,4 +1,4 @@
-use std::net::Ipv4Addr;
+use std::{fmt::Display, net::Ipv4Addr};
 
 pub type Error = Box<dyn std::error::Error>;
 pub type Result<T> = std::result::Result<T, Error>;
@@ -112,6 +112,51 @@ impl BytePacketBuffer {
 
         Ok(())
     }
+
+    fn write(&mut self, val: u8) -> Result<()> {
+        self.not_end_of_buf(self.pos)?;
+        self.buf[self.pos] = val;
+        self.pos += 1;
+        Ok(())
+    }
+    fn write_u8(&mut self, val: u8) -> Result<()> {
+        self.write(val)?;
+        Ok(())
+    }
+    fn write_u16(&mut self, val: u16) -> Result<()> {
+        let a = ((val >> 8) & 0xFF) as u8;
+        let b = ((val >> 0) & 0xFF) as u8;
+        self.write(a)?;
+        self.write(b)?;
+        Ok(())
+    }
+    fn write_u32(&mut self, val: u32) -> Result<()> {
+        let a = ((val >> 24) & 0xFF) as u8;
+        let b = ((val >> 16) & 0xFF) as u8;
+        let c = ((val >> 8) & 0xFF) as u8;
+        let d = ((val >> 0) & 0xFF) as u8;
+
+        self.write(a)?;
+        self.write(b)?;
+        self.write(c)?;
+        self.write(d)?;
+        Ok(())
+    }
+
+    fn write_qname(&mut self, qname: &str) -> Result<()> {
+        for label in qname.split('.') {
+            let len = label.len();
+            if len > 0x3f {
+                return Err("Single label exceeds 63 characters of length".into());
+            }
+            self.write_u8(len as u8)?;
+            for c in label.as_bytes() {
+                self.write_u8(*c)?;
+            }
+        }
+        self.write_u8(0)?;
+        Ok(())
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -209,6 +254,36 @@ impl DnsHeader {
 
         Ok(())
     }
+
+    pub fn write(&self, buffer: &mut BytePacketBuffer) -> Result<()> {
+        // id
+        buffer.write_u16(self.id)?;
+
+        // flags
+        let mut a = 0;
+        a |= (self.response as u8) << 7;
+        a |= (self.opcode & 0xF) << 3;
+        a |= (self.authoritative_answer as u8) << 2;
+        a |= (self.truncated_message as u8) << 1;
+        a |= (self.recursion_desired as u8) << 0;
+        buffer.write_u8(a)?;
+
+        let mut b = 0;
+        b |= (self.recursion_available as u8) << 7;
+        b |= (self.z as u8) << 6;
+        b |= (self.authed_data as u8) << 5;
+        b |= (self.checking_disabled as u8) << 4;
+        b |= (self.rescode as u8) & 0xF;
+        buffer.write_u8(b)?;
+
+        // section counts
+        buffer.write_u16(self.questions)?;
+        buffer.write_u16(self.answers)?;
+        buffer.write_u16(self.authoritative_entries)?;
+        buffer.write_u16(self.resource_entries)?;
+
+        Ok(())
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
@@ -251,6 +326,14 @@ impl DnsQuestion {
         buffer.read_qname(&mut self.name)?;
         self.qtype = QueryType::from_num(buffer.read_u16()?); // qtype
         let _ = buffer.read_u16()?; // class
+
+        Ok(())
+    }
+
+    pub fn write(&self, buffer: &mut BytePacketBuffer) -> Result<()> {
+        buffer.write_qname(&self.name)?;
+        buffer.write_u16(self.qtype.to_num())?;
+        buffer.write_u16(1)?; // class
 
         Ok(())
     }
@@ -311,6 +394,30 @@ impl DnsRecord {
             }
         }
     }
+
+    pub fn write(&self, buffer: &mut BytePacketBuffer) -> Result<usize> {
+        let start_pos = buffer.pos();
+        match self {
+            DnsRecord::A { domain, addr, ttl } => {
+                buffer.write_qname(domain)?;
+                buffer.write_u16(QueryType::A.to_num())?;
+                buffer.write_u16(1)?; // class
+                buffer.write_u32(*ttl)?;
+                buffer.write_u16(4)?; // len
+
+                let octets = addr.octets();
+                buffer.write_u8(octets[0])?;
+                buffer.write_u8(octets[1])?;
+                buffer.write_u8(octets[2])?;
+                buffer.write_u8(octets[3])?;
+            }
+            DnsRecord::UNKNOWN { .. } => {
+                println!("Skpping record: {:?}", self);
+            }
+        }
+
+        Ok(buffer.pos() - start_pos)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -357,5 +464,55 @@ impl DnsPacket {
         }
 
         Ok(result)
+    }
+
+    pub fn write(&mut self, buffer: &mut BytePacketBuffer) -> Result<()> {
+        self.header.questions = self.questions.len() as u16;
+        self.header.answers = self.answers.len() as u16;
+        self.header.authoritative_entries = self.authorities.len() as u16;
+        self.header.resource_entries = self.resources.len() as u16;
+
+        self.header.write(buffer)?;
+        for q in &self.questions {
+            q.write(buffer)?;
+        }
+        for res in &self.answers {
+            res.write(buffer)?;
+        }
+        for res in &self.authorities {
+            res.write(buffer)?;
+        }
+        for res in &self.resources {
+            res.write(buffer)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Display for DnsPacket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{:#?}", self.header)?;
+
+        writeln!(f, "### Question Section({}):", self.questions.len())?;
+        for q in &self.questions {
+            writeln!(f, "{:#?}", q)?;
+        }
+
+        writeln!(f, "### Answer Section({}):", self.answers.len())?;
+        for rec in &self.answers {
+            writeln!(f, "{:#?}", rec)?;
+        }
+
+        writeln!(f, "### Authority Section({}):", self.authorities.len())?;
+        for rec in &self.authorities {
+            writeln!(f, "{:#?}", rec)?;
+        }
+
+        writeln!(f, "### Additional Section({}):", self.resources.len())?;
+        for rec in &self.resources {
+            writeln!(f, "{:#?}", rec)?;
+        }
+        Ok(())
     }
 }
