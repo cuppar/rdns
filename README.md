@@ -2,16 +2,12 @@
 
 A toy DNS by Rust from scratch.
 
-rdns default use port 22222 to open underlying UDP connection.
+rdns default listening port 2053.
 
-Usage:
-```
-rdns <domain> <query-type>
+#### Start server
 
-    <query-type> is one of:
-        - a
-        - ns
-        - cname
-        - mx
-        - aaaa
-```
+![](img/1.png)
+
+#### Test 
+
+![](img/2.png)

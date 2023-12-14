@@ -49,7 +49,7 @@ impl BytePacketBuffer {
         self.not_end_of_buf(pos)?;
         Ok(self.buf[pos])
     }
-    fn get_range(&self, start: usize, len: usize) -> Result<&[u8]> {
+    pub fn get_range(&self, start: usize, len: usize) -> Result<&[u8]> {
         self.not_end_of_buf(start + len)?;
         Ok(&self.buf[start..start + len])
     }
