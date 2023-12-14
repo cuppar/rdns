@@ -11,8 +11,8 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    let qname = "baidu.com";
-    let qtype = QueryType::A;
+    let qname = "yahoo.com";
+    let qtype = QueryType::MX;
 
     let server = ("8.8.8.8", 53);
 
