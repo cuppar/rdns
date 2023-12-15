@@ -2,12 +2,12 @@
 
 A toy DNS by Rust from scratch.
 
-rdns default listening port 2053.
+rdns default listening port 2053, and use port 22222 to perform underlying UDP lookup.
 
-#### Start server
+#### Start a `A` query
 
 ![](img/1.png)
 
-#### Test 
+#### Server response
 
 ![](img/2.png)
